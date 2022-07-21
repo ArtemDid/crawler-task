@@ -1,17 +1,16 @@
 import Crawler from "crawler";
-import isUrl from "is-url";
-import db, { insertUrl } from "../db/knex.config";
-import client from "../db/redis.config";
+import Queue from "bull";
+import request from "request";
+import db, { insertUrl, createTableWithURLs } from "../db/knex.config";
+import client, { isExistsUrl } from "../db/redis.config";
 import { parse } from "tldts";
+import { anchorsOfCheerio, isParsedUrl } from "./servises/getUrl";
 
-const c = new Crawler({
-  maxConnections: 10,
-  rateLimit: 100,
-});
+const URLsQueue = new Queue("parser", "redis://127.0.0.1:6379");
 
-let execTime = 0;
-let i: number = 0;
-// let domen: any = "";
+let size = 0;
+let queueSize: number,
+  execTime: number = 0;
 
 let dataUrl: Array<string> = [
   "https://www.themanual.com/food-and-drink/best-large-air-fryers/",
@@ -41,49 +40,45 @@ let dataUrl: Array<string> = [
   "https://www.gearhungry.com/best-dog-bark-collars/",
 ];
 
-let k = 1;
+URLsQueue.process((job, done) => {
+  console.log("data: ", job.data);
+  console.log("id: ", job.id);
 
-const getCrawlerCallback = (url: string, domen: string) => {
-  return (err: any, res: any, done: any) => {
-    if (err) throw err;
+  request(job.data.uri, (error, response, html) => {
+    if (error || response.statusCode !== 200) done();
 
-    let $ = res.$;
     try {
-      const anchors = $("a");
+      const anchors = anchorsOfCheerio(html);
+
       Object.keys(anchors).forEach(async (item) => {
         if (anchors[item].type === "tag") {
           const href: string = anchors[item].attribs.href
             ?.trim()
             .replace(/(.+)(\/)$/, "$1");
 
-          const parsedUrl: string = isUrl(href) ? href : `${domen}${href}`;
-
-          // console.log("parsed: ", parsedUrl);
+          const parsedUrl: string = isParsedUrl(href, job.data.domen);
 
           const start = Date.now();
-          const isExists = await client.exists(
-            //@ts-ignore
-            parsedUrl,
-            (error: any, exists: any) => {
-              if (error) return done();
-
-              if (parseInt(exists.toString("utf-8")) === 1) return true;
-              else return false;
-            }
-          );
-
+          const isExists = await isExistsUrl(parsedUrl, done);
           const end = Date.now();
-
           execTime = end - start;
-          // console.log("1:");
-
+          console.log("is: ", isExists);
           try {
-            if (parsedUrl && href.toString().includes(domen) && !isExists) {
+            if (
+              parsedUrl &&
+              href.toString().includes(job.data.domen) &&
+              !isExists
+            ) {
+              await client.select(3);
               await client.set(decodeURI(parsedUrl), 0);
 
-              crawlAllUrls(encodeURI(parsedUrl), domen);
+              URLsQueue.add({
+                uri: encodeURI(parsedUrl),
+                domen: job.data.domen,
+              });
 
-              i += k;
+              size++;
+              queueSize = parseInt(job.id.toString());
             }
           } catch {
             done();
@@ -95,74 +90,59 @@ const getCrawlerCallback = (url: string, domen: string) => {
       done();
     }
     done();
-  };
-};
-
-function crawlAllUrls(url: string, domen: string) {
-  c.queue({
-    uri: url,
-    callback: getCrawlerCallback(url, domen),
   });
+});
+
+// for (const url_item of dataUrl) {
+const { hostname, domainWithoutSuffix } = parse(dataUrl[0]);
+
+start("https://" + hostname, domainWithoutSuffix);
+// }
+
+async function start(hostname, nameTable) {
+  await createTableWithURLs(nameTable);
+
+  URLsQueue.add({ uri: hostname, domen: hostname });
 }
 
-let arrOfUrl: any;
-let nameTable: string;
-
-for (const url_item of dataUrl) {
-  const { hostname, domainWithoutSuffix } = parse(url_item);
-
-  start("https://" + hostname, domainWithoutSuffix);
-}
-
-async function start(domen, nameTable) {
-  if (!(await db.schema.hasTable(nameTable))) {
-    await db.schema.createTable(nameTable, (table) => {
-      table.increments("id").primary().unsigned();
-      table.text("url").unique();
-    });
-  }
-
-  crawlAllUrls(domen, domen);
-}
-
-let check = true;
+// let check = true;
 
 setInterval(async () => {
-  if (check) {
-    check = false;
-    console.log("-------- LOGS ---------");
-    console.log("urls size", i);
-    console.log("queue size", c.queueSize);
-    console.log("last execution time on .has", execTime);
-    // console.log("domen ", domen);
+  // if (check) {
+  // check = false;
+  console.log("-------- LOGS ---------");
+  console.log("urls size", size);
+  console.log("queue size", queueSize);
+  console.log("last execution time on .has", execTime);
+  // console.log("domen ", domen);
 
-    const keys: [] = await client.sendCommand(["keys", "*"]);
-    let arrWithUrl = [];
-    let itemRedisValue: string | null = "";
+  const keys: [] = await client.sendCommand(["keys", "*"]);
+  let arrWithUrl = [];
+  let itemRedisValue: string | null = "";
 
-    for (const url_item of dataUrl) {
-      const dataDomain = parse(url_item);
+  for (const url_item of dataUrl) {
+    const dataDomain = parse(url_item);
 
-      for (const key of keys) {
-        const keyUrl = parse(key);
+    for (const key of keys) {
+      const keyUrl = parse(key);
+      client.select(3);
+      itemRedisValue = await client.get(key);
 
-        itemRedisValue = await client.get(key);
-
-        if (
-          itemRedisValue === "0" &&
-          dataDomain.domainWithoutSuffix === keyUrl.domainWithoutSuffix
-        ) {
-          //@ts-ignore
-          arrWithUrl.push({ url: key });
-          await client.getSet(key, "1");
-        }
+      if (
+        itemRedisValue === "0" &&
+        dataDomain.domainWithoutSuffix === keyUrl.domainWithoutSuffix
+      ) {
+        //@ts-ignore
+        arrWithUrl.push({ url: key });
+        client.select(3);
+        await client.getSet(key, "1");
       }
-
-      if (arrWithUrl.length)
-        await insertUrl(arrWithUrl, dataDomain.domainWithoutSuffix as string);
-
-      arrWithUrl.length = 0;
     }
-    check = true;
+
+    if (arrWithUrl.length)
+      await insertUrl(arrWithUrl, dataDomain.domainWithoutSuffix as string);
+
+    arrWithUrl.length = 0;
   }
+  // check = true;
 }, 5000);

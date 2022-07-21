@@ -17,3 +17,12 @@ export const insertUrl = async (req: any, nameTable: string) => {
       console.log("error: ,", error);
     });
 };
+
+export const createTableWithURLs = async (nameTable: string) => {
+  if (!(await db.schema.hasTable(nameTable))) {
+    await db.schema.createTable(nameTable, (table) => {
+      table.increments("id").primary().unsigned();
+      table.text("url").unique();
+    });
+  }
+};
