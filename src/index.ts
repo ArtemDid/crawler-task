@@ -1,9 +1,8 @@
 import Crawler from "crawler";
 import isUrl from "is-url";
-import db from "../db/knex.config";
+import db, { insertUrl } from "../db/knex.config";
 import client from "../db/redis.config";
-
-let i = 0;
+import { parse } from "tldts";
 
 const c = new Crawler({
   maxConnections: 10,
@@ -11,8 +10,8 @@ const c = new Crawler({
 });
 
 let execTime = 0;
-
-let domen: any = "";
+let i: number = 0;
+// let domen: any = "";
 
 let dataUrl: Array<string> = [
   "https://www.themanual.com/food-and-drink/best-large-air-fryers/",
@@ -42,6 +41,8 @@ let dataUrl: Array<string> = [
   "https://www.gearhungry.com/best-dog-bark-collars/",
 ];
 
+let k = 1;
+
 const getCrawlerCallback = (url: string, domen: string) => {
   return (err: any, res: any, done: any) => {
     if (err) throw err;
@@ -56,6 +57,8 @@ const getCrawlerCallback = (url: string, domen: string) => {
             .replace(/(.+)(\/)$/, "$1");
 
           const parsedUrl: string = isUrl(href) ? href : `${domen}${href}`;
+
+          // console.log("parsed: ", parsedUrl);
 
           const start = Date.now();
           const isExists = await client.exists(
@@ -72,18 +75,17 @@ const getCrawlerCallback = (url: string, domen: string) => {
           const end = Date.now();
 
           execTime = end - start;
+          // console.log("1:");
 
           try {
             if (parsedUrl && href.toString().includes(domen) && !isExists) {
-              i++;
-
-              console.log("domen: ", domen);
-
               await client.set(decodeURI(parsedUrl), 0);
 
               crawlAllUrls(encodeURI(parsedUrl), domen);
+
+              i += k;
             }
-          } catch (e) {
+          } catch {
             done();
           }
         }
@@ -103,22 +105,13 @@ function crawlAllUrls(url: string, domen: string) {
   });
 }
 
-let arrOfUrl: Array<string>;
+let arrOfUrl: any;
 let nameTable: string;
 
 for (const url_item of dataUrl) {
-  arrOfUrl = url_item.split(/\/\/|\//);
+  const { hostname, domainWithoutSuffix } = parse(url_item);
 
-  domen = arrOfUrl[0] === "https:" ? arrOfUrl[0] + "//" + arrOfUrl[1] : null;
-
-  nameTable =
-    arrOfUrl[1].split(".")[1] === "com"
-      ? arrOfUrl[1].split(".")[0]
-      : arrOfUrl[1].split(".")[1];
-
-  // (async function temp() {
-  start(domen, nameTable);
-  // })();
+  start("https://" + hostname, domainWithoutSuffix);
 }
 
 async function start(domen, nameTable) {
@@ -130,41 +123,46 @@ async function start(domen, nameTable) {
   }
 
   crawlAllUrls(domen, domen);
+}
 
-  setInterval(async () => {
+let check = true;
+
+setInterval(async () => {
+  if (check) {
+    check = false;
     console.log("-------- LOGS ---------");
     console.log("urls size", i);
     console.log("queue size", c.queueSize);
     console.log("last execution time on .has", execTime);
-    console.log("domen ", domen);
+    // console.log("domen ", domen);
 
     const keys: [] = await client.sendCommand(["keys", "*"]);
     let arrWithUrl = [];
     let itemRedisValue: string | null = "";
 
-    for (const key of keys) {
-      itemRedisValue = await client.get(key);
+    for (const url_item of dataUrl) {
+      const dataDomain = parse(url_item);
 
-      if (itemRedisValue === "0") {
-        //@ts-ignore
-        arrWithUrl.push({ url: key });
-        await client.getSet(key, "1");
+      for (const key of keys) {
+        const keyUrl = parse(key);
+
+        itemRedisValue = await client.get(key);
+
+        if (
+          itemRedisValue === "0" &&
+          dataDomain.domainWithoutSuffix === keyUrl.domainWithoutSuffix
+        ) {
+          //@ts-ignore
+          arrWithUrl.push({ url: key });
+          await client.getSet(key, "1");
+        }
       }
+
+      if (arrWithUrl.length)
+        await insertUrl(arrWithUrl, dataDomain.domainWithoutSuffix as string);
+
+      arrWithUrl.length = 0;
     }
-
-    await createUrl(arrWithUrl, nameTable);
-  }, 5000);
-}
-
-async function createUrl(req: any, nameTable: string) {
-  await db(nameTable)
-    .insert(req)
-    .onConflict("url")
-    .ignore()
-    .then(() => {
-      console.log("Ok ", nameTable);
-    })
-    .catch((error: any) => {
-      console.log("error: ,", error);
-    });
-}
+    check = true;
+  }
+}, 5000);
