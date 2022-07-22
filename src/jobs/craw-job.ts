@@ -1,13 +1,9 @@
-import { insertUrl, createTableWithURLs } from "../repositories/requestToDB";
+import { insertUrl, createTableWithURLs, isExistsUrl } from "../repositories";
 import { bull } from "../queues/crawl-queue";
 import request from "request";
 import { parse } from "tldts";
 import { anchorsOfCheerio, isParsedUrl } from "../servises/getUrl";
-import {
-  isExistsUrl,
-  urlsRedisClient,
-  queueRedisClient,
-} from "../../db/redis.config";
+import { urlsRedisClient, queueRedisClient } from "../../db/redis.config";
 import { dataUrl } from "../../data";
 
 let size: number = 0,
@@ -20,7 +16,7 @@ export const crawlDomain = async (hostname, nameTable) => {
   bull.add({ uri: hostname, domen: hostname });
 };
 
-bull.process(50, (job, done) => {
+bull.process(8, (job, done) => {
   console.log("data: ", job.data);
   console.log("id: ", job.id);
 

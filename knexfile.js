@@ -5,7 +5,7 @@ console.log(
   process.env.USER_NAME,
   process.env.PASSWORD,
   process.env.HOST,
-  process.env.PORT
+  process.env.PORTDB
 );
 
 module.exports = {
@@ -15,7 +15,7 @@ module.exports = {
     user: process.env.USER_NAME,
     password: process.env.PASSWORD,
     host: process.env.HOST,
-    port: process.env.PORT,
+    port: process.env.PORTDB,
     insecureAuth: true,
   },
   pool: {

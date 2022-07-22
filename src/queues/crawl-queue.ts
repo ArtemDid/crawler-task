@@ -1,11 +1,5 @@
 import Bull from "bull";
-
-const redis = {
-  host: "localhost",
-  port: 6379,
-  maxRetriesPerRequest: null,
-  connectTimeout: 180000,
-};
+import { redisOptions as redis } from "../../db/redis.config";
 
 const defaultJobOptions = {
   removeOnComplete: true,

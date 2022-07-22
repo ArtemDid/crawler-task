@@ -1,13 +1,20 @@
-import { createClient } from "redis";
+import { createClient, RedisClientOptions } from "redis";
 
-const urlsRedisClient = createClient();
+export const redisOptions = {
+  host: process.env.HOST,
+  port: parseInt(process.env.PORTREDIS || "6379"),
+  maxRetriesPerRequest: null,
+  connectTimeout: 180000,
+};
+
+const urlsRedisClient = createClient(redisOptions as RedisClientOptions);
 
 urlsRedisClient.on("error", (err: any) =>
   console.log("Redis Client Error", err)
 );
 urlsRedisClient.connect();
 
-const queueRedisClient = createClient();
+const queueRedisClient = createClient(redisOptions as RedisClientOptions);
 
 queueRedisClient.on("error", (err: any) =>
   console.log("Redis Client Error", err)
@@ -15,17 +22,3 @@ queueRedisClient.on("error", (err: any) =>
 queueRedisClient.connect();
 
 export { urlsRedisClient, queueRedisClient };
-
-export const isExistsUrl = async (parsedUrl: string, done: any) => {
-  urlsRedisClient.select(3);
-
-  return urlsRedisClient.exists(
-    //@ts-ignore
-    parsedUrl,
-    (error: any, exists: any) => {
-      if (error) return done();
-
-      return parseInt(exists.toString("utf-8")) === 1 ? true : false;
-    }
-  );
-};
