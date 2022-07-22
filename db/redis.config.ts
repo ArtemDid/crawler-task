@@ -1,16 +1,25 @@
 import { createClient } from "redis";
 
-const client = createClient();
+const urlsRedisClient = createClient();
 
-client.on("error", (err: any) => console.log("Redis Client Error", err));
-client.connect();
+urlsRedisClient.on("error", (err: any) =>
+  console.log("Redis Client Error", err)
+);
+urlsRedisClient.connect();
 
-export default client;
+const queueRedisClient = createClient();
+
+queueRedisClient.on("error", (err: any) =>
+  console.log("Redis Client Error", err)
+);
+queueRedisClient.connect();
+
+export { urlsRedisClient, queueRedisClient };
 
 export const isExistsUrl = async (parsedUrl: string, done: any) => {
-  client.select(3);
+  urlsRedisClient.select(3);
 
-  return client.exists(
+  return urlsRedisClient.exists(
     //@ts-ignore
     parsedUrl,
     (error: any, exists: any) => {
