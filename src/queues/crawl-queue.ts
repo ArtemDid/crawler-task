@@ -7,7 +7,7 @@ const defaultJobOptions = {
 };
 
 const limiter = {
-  max: 10000,
+  max: 100,
   duration: 1000,
   bounceBack: false,
 };

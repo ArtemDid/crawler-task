@@ -12,13 +12,15 @@ let size: number = 0,
 
 export const crawlDomain = async (hostname, nameTable) => {
   await createTableWithURLs(nameTable);
+  // console.log("category11111: ", nameTable);
 
   bull.add({ uri: hostname, domen: hostname });
 };
 
 bull.process(8, (job, done) => {
-  console.log("data: ", job.data);
-  console.log("id: ", job.id);
+  // console.log("data: ", job.data);
+  // console.log("id: ", job.id);
+  const { domainWithoutSuffix } = parse(job.data.domen);
 
   request(job.data.uri, (error, response, html) => {
     if (error || response.statusCode !== 200) done();
@@ -35,7 +37,11 @@ bull.process(8, (job, done) => {
           const parsedUrl: string = isParsedUrl(href, job.data.domen);
 
           const start = Date.now();
-          const isExists = await isExistsUrl(parsedUrl, done);
+          const isExists =
+            (await isExistsUrl(parsedUrl, domainWithoutSuffix as string)) ===
+            null
+              ? false
+              : true;
           const end = Date.now();
           execTime = end - start;
           // console.log("is: ", isExists);
@@ -45,15 +51,23 @@ bull.process(8, (job, done) => {
               href.toString().includes(job.data.domen) &&
               !isExists
             ) {
-              // await client.select(3);
-              await urlsRedisClient.set(decodeURI(parsedUrl), 0);
+              size++;
 
+              await urlsRedisClient.select(3);
+              //@ts-ignore
+              await urlsRedisClient.sendCommand([
+                "ZADD",
+                domainWithoutSuffix as string,
+                "0",
+                decodeURI(parsedUrl),
+              ]);
+
+              // await urlsRedisClient.set(decodeURI(parsedUrl), 0);
               bull.add({
                 uri: encodeURI(parsedUrl),
                 domen: job.data.domen,
               });
 
-              size++;
               queueSize = parseInt(job.id.toString());
             }
           } catch {
@@ -78,32 +92,47 @@ setInterval(async () => {
   console.log("last execution time on .has", execTime);
   // console.log("domen ", domen);
 
-  urlsRedisClient.select(3);
-  const keys: [] = await urlsRedisClient.sendCommand(["keys", "*"]);
   let arrWithUrl = [];
   let itemRedisValue: string | null = "";
 
   for (const url_item of dataUrl) {
     const dataDomain = parse(url_item);
 
-    for (const key of keys) {
-      const keyUrl = parse(key);
+    urlsRedisClient.select(3);
+    const keys: [] = await urlsRedisClient.sendCommand([
+      "ZRANGE",
+      dataDomain.domainWithoutSuffix as string,
+      "0",
+      "500",
+      "WITHSCORES",
+    ]);
+
+    // console.log("keys: ", keys);
+
+    for (let i = 1; i < keys.length; i += 2) {
+      const keyUrl = parse(keys[i - 1]);
       urlsRedisClient.select(3);
-      itemRedisValue = await urlsRedisClient.get(key);
 
       if (
-        itemRedisValue === "0" &&
+        keys[i] === "0" &&
         dataDomain.domainWithoutSuffix === keyUrl.domainWithoutSuffix
       ) {
         //@ts-ignore
-        arrWithUrl.push({ url: key });
+        arrWithUrl.push({ url: keys[i - 1] });
         urlsRedisClient.select(3);
-        await urlsRedisClient.getSet(key, "1");
+        await urlsRedisClient.sendCommand([
+          "ZINCRBY",
+          dataDomain.domainWithoutSuffix as string,
+          "1",
+          keys[i - 1],
+        ]);
       }
     }
 
     if (arrWithUrl.length)
       await insertUrl(arrWithUrl, dataDomain.domainWithoutSuffix as string);
+
+    console.log(arrWithUrl);
 
     arrWithUrl.length = 0;
   }

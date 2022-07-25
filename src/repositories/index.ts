@@ -23,16 +23,12 @@ export const createTableWithURLs = async (nameTable: string) => {
   }
 };
 
-export const isExistsUrl = async (parsedUrl: string, done: any) => {
+export const isExistsUrl = async (parsedUrl: string, category: string) => {
   urlsRedisClient.select(3);
 
-  return urlsRedisClient.exists(
-    //@ts-ignore
-    parsedUrl,
-    (error: any, exists: any) => {
-      if (error) return done();
-
-      return parseInt(exists.toString("utf-8")) === 1 ? true : false;
-    }
-  );
+  return await urlsRedisClient.sendCommand([
+    "ZRANK",
+    category,
+    encodeURI(parsedUrl),
+  ]);
 };
